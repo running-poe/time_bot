@@ -197,12 +197,11 @@ defmodule TimeBot.Bot do
   end
 
   # Расчет: Сезоны
-  defp calculate_next_date(now, month, day) do
+   defp calculate_next_date(now, month, day) do
     year = case {month, day} do
       {3, 1} -> if now.month >= 3, do: now.year + 1, else: now.year
       {6, 1} -> if now.month >= 6, do: now.year + 1, else: now.year
-      {1, 1} -> now.year + 1 # Новый год
-      _ -> now.year
+      {1, 1} -> now.year + 1 # Новый год всегда в следующем году (относительно текущего момента)
     end
 
     Timex.set(now, [year: year, month: month, day: day, hour: 0, minute: 0, second: 0, microsecond: 0])
@@ -211,7 +210,7 @@ defmodule TimeBot.Bot do
   # Расчет: 19:00
   defp calculate_next_19h(now) do
     target = Timex.set(now, [hour: 19, minute: 0, second: 0, microsecond: 0])
-    if Timex.compare(target, now) == :lt do
+    if Timex.compare(target, now) == -1 do
       Timex.shift(target, days: 1)
     else
       target
