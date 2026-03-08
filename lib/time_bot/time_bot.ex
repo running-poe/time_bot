@@ -131,12 +131,12 @@ defmodule TimeBot.Bot do
     }
 
     response =
-      Enum.find_value(keyword_to_event, "Используйте /start для списка команд", fn {keyword, key} ->
+      Enum.find_value(keyword_to_event, "Используйте /start для получения списка команд", fn {keyword, key} ->
         if String.contains?(text_lower, keyword), do: format_event_response(key)
       end)
 
     response =
-      if response == "Используйте /start для списка команд" and
+      if response == "Используйте /start для получения списка команд" and
            (String.contains?(text_lower, "все") or String.contains?(text_lower, "событи")) do
         format_all_events()
       else
