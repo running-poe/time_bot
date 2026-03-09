@@ -35,7 +35,7 @@ defmodule TimeBot.Bot do
         {:noreply, Map.put(state, :offset, new_offset)}
 
       {:error, reason} ->
-        Logger.error("Polling error: #{inspect(reason)}")
+        Logger.warning("Polling warning: #{inspect(reason)}")
         schedule_poll()
         {:noreply, state}
     end
@@ -115,6 +115,7 @@ defmodule TimeBot.Bot do
   end
 
   defp handle_message(%{text: "/all"} = msg) do
+    Logger.debug("Обработка /all")
     Telegex.send_message(msg.chat.id, format_all_events())
   end
 
@@ -126,6 +127,7 @@ defmodule TimeBot.Bot do
   end
 
   defp handle_message(%{text: "/add " <> args} = msg) do
+    Logger.debug("Обработка /add")
     response = TimeBot.CustomEvents.handle_add(msg.from.id, msg.text)
     Telegex.send_message(msg.chat.id, response)
   end

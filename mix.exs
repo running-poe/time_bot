@@ -11,18 +11,20 @@ defmodule TimeBot.MixProject do
   ]
 end
 
-  def application do
-    [
-      extra_applications: [:logger],
-      mod: {TimeBot.Application, []}
-    ]
-  end
+def application do
+  [
+    # Добавляем :castore сюда, чтобы он попал в релиз
+    extra_applications: [:logger],
+    mod: {TimeBot.Application, []}
+  ]
+end
 
   defp deps do
     [
       {:telegex, "~> 1.7"},
       {:timex, "~> 3.7"},
-      {:finch, "~> 0.16"}
+      {:finch, "~> 0.16"},
+      {:jason, "~> 1.4"}
     ]
   end
 end

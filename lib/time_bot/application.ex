@@ -4,10 +4,15 @@ defmodule TimeBot.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Запускаем Finch (HTTP клиент)
-      {Finch, name: TimeBot.Finch},
-
-      # Запускаем бота
+      {Finch,
+        name: TimeBot.Finch,
+        pools: %{
+          default: [
+            # Используем системные сертификаты Debian
+            conn_opts: [transport_opts: [cacertfile: "/etc/ssl/certs/ca-certificates.crt"]]
+          ]
+        }
+      },
       TimeBot.Bot
     ]
 
