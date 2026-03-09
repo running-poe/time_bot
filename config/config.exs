@@ -1,11 +1,9 @@
 import Config
 
-# Настройки вашего бота
+# Общие настройки (без токена)
 config :time_bot,
-  bot_token: "",
   timezone: "Europe/Moscow"
 
-# Настройки библиотеки Telegex
+# Настройки HTTP клиента Finch
 config :telegex,
-  token: "",
   adapter: {Telegex.Adapter.Finch, name: TimeBot.Finch}
