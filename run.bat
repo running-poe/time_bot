@@ -1,1 +1,1 @@
-docker run -d --name time-bot -e TIME_BOT_TOKEN="ВАШ_ТОКЕН_ТЕЛЕГРАМ" -e SUPABASE_URL="ВАШ_SUPABASE_URL" -e SUPABASE_KEY="ВАШ_SUPABASE_KEY" time-bot
+docker run -d --name time-bot -e TIME_BOT_TOKEN="8409471854:AAGhK3UE65tnBTZIWguPS2_4fBI1Yed4VM8" -e SUPABASE_URL="https://lhhfcmpzmtfeukjifaqa.supabase.co" -e SUPABASE_KEY="sb_publishable_TJNuNQlUhQY8EZrR8hB6aQ_bxm9kWRC" time-bot
