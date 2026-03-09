@@ -57,8 +57,11 @@ defmodule TimeBot.Bot do
 
   # --- INLINE ЛОГИКА ---
 
-  defp handle_inline(query) do
-    results =
+   defp handle_inline(query) do
+    now = Timex.now(Application.get_env(:time_bot, :timezone, "Europe/Moscow"))
+
+    # Получаем базовые события
+    base_results =
       @events_config
       |> Enum.map(fn {key, config} ->
         time_str = get_event_time(key)
@@ -71,18 +74,24 @@ defmodule TimeBot.Bot do
           }
         }
       end)
-      |> Kernel.++([
-        %Telegex.Type.InlineQueryResultArticle{
-          id: "all",
-          type: "article",
-          title: "📊 Все события",
-          input_message_content: %Telegex.Type.InputTextMessageContent{
-            message_text: format_all_events()
-          }
-        }
-      ])
 
-    Telegex.answer_inline_query(query.id, results, cache_time: 30)
+    # Получаем пользовательские события
+    custom_results = TimeBot.CustomEvents.get_inline_results(query.from.id, now)
+
+    # Добавляем "Все события"
+    all_event_item = %Telegex.Type.InlineQueryResultArticle{
+      id: "all",
+      type: "article",
+      title: "📊 Все события",
+      input_message_content: %Telegex.Type.InputTextMessageContent{
+        message_text: format_all_events()
+      }
+    }
+
+    # Объединяем: базовые + пользовательские + "Все"
+    results = base_results ++ custom_results ++ [all_event_item]
+
+    Telegex.answer_inline_query(query.id, results, cache_time: 0)
   end
 
   # --- ЛОГИКА СООБЩЕНИЙ ---
@@ -116,6 +125,26 @@ defmodule TimeBot.Bot do
     end
   end
 
+  defp handle_message(%{text: "/add " <> args} = msg) do
+    response = TimeBot.CustomEvents.handle_add(msg.from.id, msg.text)
+    Telegex.send_message(msg.chat.id, response)
+  end
+
+  defp handle_message(%{text: "/events"} = msg) do
+    response = TimeBot.CustomEvents.handle_list(msg.from.id)
+    Telegex.send_message(msg.chat.id, response)
+  end
+
+  defp handle_message(%{text: "/remove " <> args} = msg) do
+    response = TimeBot.CustomEvents.handle_remove(msg.from.id, args)
+    Telegex.send_message(msg.chat.id, response)
+  end
+
+  defp handle_message(%{text: "/removeall"} = msg) do
+    response = TimeBot.CustomEvents.handle_remove_all(msg.from.id)
+    Telegex.send_message(msg.chat.id, response)
+  end
+
   defp handle_message(%{text: text} = msg) do
     text_lower = String.downcase(text)
 
@@ -145,6 +174,7 @@ defmodule TimeBot.Bot do
 
     Telegex.send_message(msg.chat.id, response)
   end
+
 
   defp handle_message(_), do: :ok
 
