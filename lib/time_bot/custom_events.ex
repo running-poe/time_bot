@@ -1,28 +1,24 @@
 defmodule TimeBot.CustomEvents do
   @moduledoc """
-  Модуль для работы с пользовательскими событиями через Supabase.
+  Модуль бизнес-логики для работы с пользовательскими событиями.
+  Обеспечивает взаимодействие с Supabase, парсинг дат и форматирование ответов.
   """
 
   require Logger
 
-  # --- Публичные функции для бота ---
+  @table_name "time_bot_user_events_01"
+  @max_slots 5
+
+  # --- Публичные API функции ---
 
   @doc """
-  Обрабатывает команду /add.
-  Парсит строку и сохраняет событие в первый свободный слот.
+  Обрабатывает команду /add в "однострочном" режиме (если переданы аргументы).
+  Парсит строку целиком, ищет название и дату.
   """
   def handle_add(user_id, text) do
     case parse_add_args(text) do
       {:ok, name, datetime} ->
-        case find_free_slot(user_id) do
-          {:ok, slot_id} ->
-            case create_event(user_id, slot_id, name, datetime) do
-              {:ok, _} -> "✅ Событие «#{name}» добавлено в слот ##{slot_id}."
-              {:error, reason} -> "⚠️ Ошибка БД: #{inspect(reason)}"
-            end
-          :no_slots ->
-            "❌ У вас уже 3 события. Удалите старые через /remove."
-        end
+        create_event_flow(user_id, name, datetime)
 
       :error ->
         "❌ Неверный формат. Используйте:\n/add Название YYYY-MM-DD HH:MM\nили\n/add Название YYYY-MM-DD"
@@ -30,38 +26,68 @@ defmodule TimeBot.CustomEvents do
   end
 
   @doc """
-  Обрабатывает команду /events.
-  Возвращает список событий пользователя.
+  Основная функция создания события. Проверяет наличие свободных слотов,
+  сохраняет в БД и возвращает сообщение с результатом и временем до события.
+  Используется в конце пошагового диалога.
   """
-  def handle_list(user_id) do
-    case get_events(user_id) do
-      [] -> "У вас нет сохраненных событий."
-      events ->
-        msg = Enum.map(events, fn e ->
-          dt_str = Timex.format!(e.event_date, "{YYYY}-{0M}-{0D} {h24}:{m}")
-          "ID: #{e.slot_id} | #{e.event_name} — #{dt_str}"
-        end) |> Enum.join("\n")
-        "📅 Ваши события:\n#{msg}"
+  def create_event_flow(user_id, name, datetime) do
+    case find_free_slot(user_id) do
+      {:ok, slot_id} ->
+        case create_event(user_id, slot_id, name, datetime) do
+          {:ok, _} ->
+            now = Timex.now(Application.get_env(:time_bot, :timezone, "Europe/Moscow"))
+            time_str = calculate_time_remaining(datetime, now)
+            "✅ Событие «#{name}» добавлено в слот ##{slot_id}.\n⏳ Осталось: #{time_str}"
+          {:error, reason} -> "⚠️ Ошибка БД: #{inspect(reason)}"
+        end
+      :no_slots ->
+        "❌ У вас уже #{@max_slots} событий. Удалите старые через /remove."
     end
   end
 
   @doc """
-  Обрабатывает команду /remove.
+  Формирует список событий пользователя для вывода в чате.
+  События сортируются по ID, для каждого рассчитывается оставшееся время.
+  """
+  def handle_list(user_id) do
+    timezone = Application.get_env(:time_bot, :timezone, "Europe/Moscow")
+    now = Timex.now(timezone)
+
+    case get_events(user_id) do
+      [] ->
+        "У вас нет сохраненных событий."
+
+      events ->
+        sorted_events = Enum.sort_by(events, & &1.slot_id)
+
+        msg = Enum.map(sorted_events, fn e ->
+          dt_str = Timex.format!(e.event_date, "{YYYY}-{0M}-{0D} {h24}:{m}")
+          time_str = calculate_time_remaining(e.event_date, now)
+          "ID: #{e.slot_id} | #{e.event_name} — #{dt_str}\n⏳ Осталось: #{time_str}"
+        end)
+        |> Enum.join("\n\n")
+
+        "📅 Ваши события:\n\n#{msg}"
+    end
+  end
+
+  @doc """
+  Удаляет событие по указанному ID (слоту).
   """
   def handle_remove(user_id, slot_str) do
     case Integer.parse(slot_str) do
-      {slot_id, ""} when slot_id >= 0 and slot_id < 3 ->
+      {slot_id, ""} when slot_id >= 0 and slot_id < @max_slots ->
         case delete_event(user_id, slot_id) do
           {:ok, _} -> "🗑 Событие ##{slot_id} удалено."
           {:error, _} -> "⚠️ Не удалось удалить (возможно, слот пуст)."
         end
       _ ->
-        "❌ Укажите корректный ID (0, 1 или 2)."
+        "❌ Укажите корректный ID (от 0 до #{@max_slots - 1})."
     end
   end
 
   @doc """
-  Обрабатывает команду /removeall.
+  Удаляет все события пользователя.
   """
   def handle_remove_all(user_id) do
     case delete_all_events(user_id) do
@@ -71,8 +97,8 @@ defmodule TimeBot.CustomEvents do
   end
 
   @doc """
-  Возвращает список событий для Inline-режима.
-  Формат: список структур для ответа Telegram.
+  Формирует список результатов для Inline-режима.
+  Принимает `now` как аргумент для консистентности времени.
   """
   def get_inline_results(user_id, now) do
     events = get_events(user_id)
@@ -92,33 +118,52 @@ defmodule TimeBot.CustomEvents do
     end)
   end
 
-  # --- Внутренняя логика и работа с Supabase ---
-
-  defp parse_add_args(text) do
-    # Пытаемся распарсить: /add Name YYYY-MM-DD HH:MM
-    case String.split(text, " ", parts: 3) do
-      [_, name, date_str] ->
-        # Пробуем парсинг с временем
-        case Timex.parse(date_str, "{YYYY}-{0M}-{0D} {h24}:{m}") do
-          {:ok, dt} -> {:ok, name, Timex.to_datetime(dt)}
-          {:error, _} ->
-            # Пробуем парсинг без времени (ставим 00:00)
-            case Timex.parse(date_str, "{YYYY}-{0M}-{0D}") do
-              {:ok, dt} -> {:ok, name, Timex.to_datetime(dt)}
-              _ -> :error
-            end
-        end
-      _ -> :error
-    end
-  end
-
-  defp find_free_slot(user_id) do
+  @doc """
+  Проверяет наличие свободных слотов для пользователя.
+  Возвращает `{:ok, slot_id}` или `:no_slots`.
+  Используется для валидации перед началом диалога.
+  """
+  def find_free_slot(user_id) do
     events = get_events(user_id)
     used_slots = MapSet.new(events, & &1.slot_id)
 
-    Enum.find_value(0..2, :no_slots, fn i ->
+    Enum.find_value(0..(@max_slots - 1), :no_slots, fn i ->
       if MapSet.member?(used_slots, i), do: nil, else: {:ok, i}
     end)
+  end
+
+  @doc """
+  Парсит строку с датой и временем. Используется на втором шаге диалога.
+  Поддерживает форматы `YYYY-MM-DD HH:MM` и `YYYY-MM-DD`.
+  Возвращает `{:ok, datetime}` или `:error`.
+  """
+  def parse_date(text) do
+    timezone = Application.get_env(:time_bot, :timezone, "Europe/Moscow")
+
+    case Timex.parse(String.trim(text), "{YYYY}-{0M}-{0D} {h24}:{m}") do
+      {:ok, naive_dt} -> {:ok, Timex.to_datetime(naive_dt, timezone)}
+      {:error, _} ->
+        case Timex.parse(String.trim(text), "{YYYY}-{0M}-{0D}") do
+          {:ok, naive_dt} -> {:ok, Timex.to_datetime(naive_dt, timezone)}
+          _ -> :error
+        end
+    end
+  end
+
+  # --- Приватные функции ---
+
+  defp parse_add_args(text) do
+    regex = ~r/^(.*?)\s+(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)$/
+
+    case Regex.run(regex, text) do
+      [_, name, date_str] ->
+        case parse_date(date_str) do
+          {:ok, dt} -> {:ok, String.trim(name), dt}
+          :error -> :error
+        end
+      _ ->
+        :error
+    end
   end
 
   defp calculate_time_remaining(target, now) do
@@ -133,18 +178,15 @@ defmodule TimeBot.CustomEvents do
     "#{days}д #{hours}ч #{minutes}м"
   end
 
-  # --- Supabase API Requests ---
+  # --- Supabase API ---
 
-  # Получение событий
   defp get_events(user_id) do
-    url = supabase_url() <> "/rest/v1/time_bot_user_events_01?user_id=eq.#{user_id}&select=*"
+    url = supabase_url() <> "/rest/v1/#{@table_name}?user_id=eq.#{user_id}&select=*"
 
     case request(:get, url) do
       {:ok, body} ->
-        # ИСПОЛЬЗУЕМ JASON ВМЕСТО POISON
         Jason.decode!(body, keys: :atoms)
         |> Enum.map(fn e ->
-          # Парсим строку даты из Supabase в Timex DateTime
           {:ok, dt, _} = DateTime.from_iso8601(e.event_date)
           %{e | event_date: Timex.to_datetime(dt)}
         end)
@@ -152,9 +194,8 @@ defmodule TimeBot.CustomEvents do
     end
   end
 
-  # Создание события (upsert)
   defp create_event(user_id, slot_id, name, datetime) do
-    url = supabase_url() <> "/rest/v1/time_bot_user_events_01"
+    url = supabase_url() <> "/rest/v1/#{@table_name}"
     body = Jason.encode!(%{
       user_id: user_id,
       slot_id: slot_id,
@@ -169,19 +210,16 @@ defmodule TimeBot.CustomEvents do
     request(:post, url, body, headers)
   end
 
-  # Удаление конкретного события
   defp delete_event(user_id, slot_id) do
-    url = supabase_url() <> "/rest/v1/time_bot_user_events_01?user_id=eq.#{user_id}&slot_id=eq.#{slot_id}"
+    url = supabase_url() <> "/rest/v1/#{@table_name}?user_id=eq.#{user_id}&slot_id=eq.#{slot_id}"
     request(:delete, url)
   end
 
-  # Удаление всех событий
   defp delete_all_events(user_id) do
-    url = supabase_url() <> "/rest/v1/time_bot_user_events_01?user_id=eq.#{user_id}"
+    url = supabase_url() <> "/rest/v1/#{@table_name}?user_id=eq.#{user_id}"
     request(:delete, url)
   end
 
-  # Базовый запрос
   defp request(method, url, body \\ "", extra_headers \\ []) do
     headers = [
       {"apikey", supabase_key()},

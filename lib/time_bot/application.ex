@@ -8,11 +8,13 @@ defmodule TimeBot.Application do
         name: TimeBot.Finch,
         pools: %{
           default: [
-            # Используем системные сертификаты Debian
-            conn_opts: [transport_opts: [cacertfile: "/etc/ssl/certs/ca-certificates.crt"]]
+            conn_opts: [
+              transport_opts: [cacertfile: "/etc/ssl/certs/ca-certificates.crt"]
+            ]
           ]
         }
       },
+      TimeBot.SessionStore, # <--- Добавили хранилище сессий
       TimeBot.Bot
     ]
 
